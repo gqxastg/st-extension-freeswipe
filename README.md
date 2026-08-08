@@ -36,8 +36,8 @@ Use the `/aswipe` (or `/as`) slash command in the chat input box.
 * `/aswipe` - Adds an empty swipe to the last message.
 * `/aswipe -2` - Adds an empty swipe to the second-to-last message. (Useful if you want to scroll up and edit it manually later).
 * `/aswipe switch=true -2` - Adds an empty swipe to the second-to-last message and immediately switches to it.
-* `/aswipe -2 This is a new swipe` - Adds a swipe with the text "This is a new swipe" to the second-to-last message.
-* `/aswipe switch=true 5 A new branch` - Adds a swipe with text to the message with ID 5 and switches to it.
+* `/aswipe -2 "This is a new swipe"` - Adds a swipe with the text "This is a new swipe" to the second-to-last message.
+* `/aswipe switch=true 5 "A new branch"` - Adds a swipe with text to the message with ID 5 and switches to it.
 
 ## Prerequisites
 
