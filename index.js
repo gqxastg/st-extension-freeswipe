@@ -27,7 +27,7 @@ async function registerSlashCommands() {
 
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'aswipe',
-            helpString: 'Free Swipe - Add a swipe to any message. \nUsage: /aswipe id=0 switch=true [text]',
+            helpString: 'Free Swipe - Add a swipe to any message. \nUsage: /aswipe [switch=true/false] [message_id] [text]',
             returns: 'string',
             aliases: ['as'],
             namedArgumentList: [
