@@ -1,0 +1,10 @@
+{
+    "display_name": "Free Swipe",
+    "loading_order": 9999,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "author": "Arashi_Lei (岚风 雷)",
+    "version": "1.0.0",
+    "homePage": "https://github.com/gqxastg"
+}
