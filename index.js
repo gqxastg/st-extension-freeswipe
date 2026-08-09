@@ -1,7 +1,18 @@
 import { extension_settings, getContext, loadExtensionSettings } from "../../../extensions.js";
 import { getMessageTimeStamp } from "../../../RossAscends-mods.js";
+import { ToolManager } from '../../../tool-calling.js';
 import { isFalseBoolean, isTrueBoolean } from '../../../utils.js';
-import { saveSettingsDebounced, deleteSwipe, deleteMessage, saveChatConditional, reloadCurrentChat, syncMesToSwipe, extractMessageBias } from "../../../../script.js";
+import { 
+    saveSettingsDebounced,
+    deleteSwipe,
+    deleteMessage,
+    saveChatConditional,
+    reloadCurrentChat,
+    syncMesToSwipe,
+    extractMessageBias,
+    messageEdit,
+    updateMessageBlock,
+} from "../../../../script.js";
 
 const extensionName = "st-extension-freeswipe";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
@@ -16,6 +27,89 @@ async function loadSettings() {
 
     // Updating settings in the UI
     $("#freeswipe_setting").prop("checked", extension_settings[extensionName].freeswipe_setting).trigger("input");
+}
+
+/**
+ * Tries to parse a string as JSON, returning the original string if parsing fails.
+ * @param {string} str The string to try to parse
+ * @returns {object|string} Parsed JSON or the original string
+ */
+function tryParse(str) {
+    try {
+        return JSON.parse(str);
+    } catch {
+        return str;
+    }
+}
+/**
+ * Groups tool names by count.
+ * @param {string[]} toolNames Tool names
+ * @returns {string} Grouped tool names
+ */
+function groupToolNames(toolNames) {
+    const toolCounts = toolNames.reduce((acc, name) => {
+        acc[name] = (acc[name] || 0) + 1;
+        return acc;
+    }, {});
+    return Object.entries(toolCounts).map(([name, count]) => count > 1 ? `${name} (${count})` : name).join(', ');
+}
+/**
+ * Formats a message with tool invocations.
+ * @param {ToolInvocation[]} invocations Tool invocations.
+ * @returns {string} Formatted message with tool invocations.
+ */
+function formatToolInvocationMessage(invocations) {
+    if (!Array.isArray(invocations) || invocations.length === 0) return '';
+
+    const data = structuredClone(invocations);
+    const detailsElement = document.createElement('details');
+    const summaryElement = document.createElement('summary');
+    const preElement = document.createElement('pre');
+    const codeElement = document.createElement('code');
+    codeElement.classList.add('language-json');
+    data.forEach(i => {
+        i.parameters = tryParse(i.parameters);
+        i.result = tryParse(i.result);
+    });
+    codeElement.textContent = JSON.stringify(data, null, 2);
+    const toolNames = data.map(i => i.displayName || i.name);
+    summaryElement.textContent = `Tool calls: ${groupToolNames(toolNames)}`;
+    preElement.append(codeElement);
+    detailsElement.append(summaryElement, preElement);
+    
+    return detailsElement.outerHTML;
+}
+/**
+ * @returns {number}
+ */
+function calcId(chat, id) {
+    if (id === undefined || id === null || id === '') {
+        return chat.length - 1; // 默认最后一条
+    }
+    id = parseInt(id, 10);
+    if (isNaN(id)) {
+        return NaN; // Message ID is invalid
+    }
+    if (id < 0) {
+        id = chat.length + id;
+    }
+    if (id < 0 || id >= chat.length) {
+        return NaN; // Message ID is out of bounds
+    }
+    return id;
+}
+/**
+ * @returns {array}
+ */
+function getAllToolMessageIds(chat) {
+    const toolMessages = [];
+    for (let i = 0; i < chat.length; i++) {
+        const invocations = chat[i]?.extra?.tool_invocations;
+        if (Array.isArray(invocations) && invocations.length > 0) {
+            toolMessages.push(i);
+        }
+    }
+    return toolMessages;
 }
 
 async function registerSlashCommands() {
@@ -45,7 +139,7 @@ async function registerSlashCommands() {
                 new SlashCommandArgument('swipe text', [ARGUMENT_TYPE.STRING], false),
             ],
             callback: async (args, argId, argText) => {
-                // Handle splitUnnamedArgument - argId might be an array with both values                
+                // Handle splitUnnamedArgument - argId might be an array with both values
                 if (Array.isArray(argId) && argId.length >= 2) {
                     argText = argId[1];
                     argId = argId[0];
@@ -53,29 +147,17 @@ async function registerSlashCommands() {
                     argId = argId[0];
                 }
 
-                const context = getContext();
-                const chat = context.chat;
-                
+                const chat = getContext()?.chat;
                 if (!chat || chat.length === 0) {
                     toastr.warning('No messages to add swipes to.', 'Free Swipe');
                     return '';
                 }
 
                 // 1. 解析 ID 
-                let id = chat.length - 1; // 默认最后一条
-                if (argId !== undefined && argId !== null && argId !== '') {
-                    id = parseInt(argId, 10);
-                    if (isNaN(id)) {
-                        toastr.error('Message ID is invalid', 'Free Swipe');
-                        return '';
-                    }
-                    if (id < 0) {
-                        id = chat.length + id; // 支持负数索引
-                    }
-                    if (id < 0 || id >= chat.length) {
-                        toastr.error('Message ID is out of bounds', 'Free Swipe');
-                        return '';
-                    }
+                let id = calcId(chat, argId);
+                if (isNaN(id)) {
+                    toastr.error('Message ID is invalid or out of bounds.', 'Free Swipe');
+                    return '';
                 }
 
                 const targetMessage = chat[id];
@@ -130,6 +212,201 @@ async function registerSlashCommands() {
                 await reloadCurrentChat();
 
                 return String(newSwipeId);
+            },
+        }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'editmessage',
+            helpString: 'Free Swipe - Opens the message editor for the specified message.',
+            aliases: ['em', 'editmsg'],
+            unnamedArgumentList: [
+                new SlashCommandArgument('message id (leave empty for the last message)', [ARGUMENT_TYPE.NUMBER], false),
+            ],
+            callback: async function (args, argId) {
+                const chat = getContext()?.chat;
+                if (!chat || chat.length === 0) {
+                    toastr.warning('No messages to edit.', 'Free Swipe');
+                    return;
+                }
+
+                let id = calcId(chat, argId);
+                if (isNaN(id)) {
+                    toastr.error('Message ID is invalid or out of bounds.', 'Free Swipe');
+                    return '';
+                }
+                if (!chat[id]) {
+                    toastr.warning('No messages to edit.', 'Free Swipe');
+                    return '';
+                }
+
+                await messageEdit(id);
+                return '';
+            },
+        }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'updatetoolmessage',
+            helpString: 'Free Swipe - Updates the specified tool message from its actual JSON.\nUsage: /updatetmsg [save=true/false] [message_id | all | ni (e.g. 0i, -1i)]',
+            aliases: ['ut', 'updatetmsg'],
+            namedArgumentList: [
+                SlashCommandNamedArgument.fromProps({
+                    name: 'save',
+                    description: 'Whether to save the chat after updating the message',
+                    typeList: [ARGUMENT_TYPE.BOOLEAN],
+                    defaultValue: 'true',
+                    enumList: commonEnumProviders.boolean()(),
+                }),
+            ],
+            unnamedArgumentList: [
+                new SlashCommandArgument('message id (leave empty for the last message, "all" for all tool messages, "ni" for n-th tool message)', [ARGUMENT_TYPE.STRING, ARGUMENT_TYPE.NUMBER], false),
+            ],
+            callback: async function (args, argId) {
+                const chat = getContext()?.chat;
+                if (!chat || chat.length === 0) {
+                    toastr.warning('No messages to update.', 'Free Swipe');
+                    return '';
+                }
+
+                let messagesToUpdate = [];
+                const strArgId = String(argId ?? '').trim().toLowerCase();
+
+                if (strArgId === 'all') {
+                    messagesToUpdate = getAllToolMessageIds(chat);
+                    if (messagesToUpdate.length === 0) {
+                        toastr.warning('No tool messages to update.', 'Free Swipe');
+                        return '';
+                    }
+                } else {
+                    let id;
+                    if (strArgId.endsWith('i') && strArgId.length > 1) {
+                        const toolMessageIds = getAllToolMessageIds(chat);
+                        if (toolMessageIds.length === 0) {
+                            toastr.warning('No tool messages to update.', 'Free Swipe');
+                            return '';
+                        }
+                        id = calcId(toolMessageIds, strArgId);
+                        if (isNaN(id)) {
+                            toastr.error('Message ID is invalid or out of bounds.', 'Free Swipe');
+                            return '';
+                        }
+                        id = toolMessageIds[id];
+                    } else {
+                        id = calcId(chat, strArgId);
+                        if (isNaN(id)) {
+                            toastr.error('Message ID is invalid or out of bounds.', 'Free Swipe');
+                            return '';
+                        }
+                    }
+                    const invocations = chat[id]?.extra?.tool_invocations;
+                    if (!Array.isArray(invocations) || invocations.length === 0) {
+                        toastr.error('Selected message is not a valid tool message.', 'Free Swipe');
+                        return '';
+                    }
+                    messagesToUpdate.push(id);
+                }
+
+                for (const id of messagesToUpdate) {
+                    const invocations = chat[id].extra.tool_invocations;
+                    chat[id].mes = formatToolInvocationMessage(invocations);
+                    updateMessageBlock(id, chat[id]);
+                }
+
+                if (isTrueBoolean(args.save ?? 'true')) {
+                    await saveChatConditional();
+                }
+                if (messagesToUpdate.length > 1) {
+                    toastr.success(`Updated ${messagesToUpdate.length} tool messages.`, 'Free Swipe');
+                } else {
+                    toastr.success('Tool message updated successfully.', 'Free Swipe');
+                }
+                return '';
+            },
+        }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'evalmessage',
+            helpString: 'Free Swipe - DANGEROUS: Evaluates JavaScript code in the context of a message object (this = message).\nUsage: /evalmessage [save=true/false] [message_id] [code]',
+            returns: 'string',
+            aliases: ['evalmsg', 'evalm'],
+            namedArgumentList: [
+                SlashCommandNamedArgument.fromProps({
+                    name: 'save',
+                    description: 'Whether to save the chat after evaluating the message',
+                    typeList: [ARGUMENT_TYPE.BOOLEAN],
+                    defaultValue: 'true',
+                    enumList: commonEnumProviders.boolean()(),
+                }),
+            ],
+            splitUnnamedArgument: true,
+            splitUnnamedArgumentCount: 2,
+            unnamedArgumentList: [
+                new SlashCommandArgument('message id (leave empty for the last message)', [ARGUMENT_TYPE.NUMBER], false),
+                new SlashCommandArgument('code', [ARGUMENT_TYPE.STRING], true),
+            ],
+            callback: async function (args, argId, argText) {
+                if (Array.isArray(argId) && argId.length >= 2) {
+                    argText = argId[1];
+                    argId = argId[0];
+                } else if (Array.isArray(argId) && argId.length === 1) {
+                    argText = argId[0];
+                    argId = undefined;
+                } else if (!argText) {
+                    argText = argId;
+                    argId = undefined;
+                }
+
+                const chat = getContext()?.chat;
+                if (!chat || chat.length === 0) {
+                    toastr.warning('No messages to evaluate.', 'Free Swipe');
+                    return '';
+                }
+
+                let id = calcId(chat, argId);
+                if (isNaN(id)) {
+                    toastr.error('Message ID is invalid or out of bounds.', 'Free Swipe');
+                    return '';
+                }
+                if (!chat[id]) {
+                    toastr.warning('No messages to evaluate.', 'Free Swipe');
+                    return '';
+                }
+
+                if (!argText) {
+                    toastr.warning('No code provided to evaluate.', 'Free Swipe');
+                    return '';
+                }
+
+                let result;
+                try {
+                    // 尝试作为表达式执行 (自动 return)
+                    try {
+                        const func = new Function(`return (${argText})`);
+                        result = func.call(chat[id]);
+                    } catch (e) {
+                        // 如果作为表达式失败，则作为普通语句执行
+                        const func = new Function(argText);
+                        result = func.call(chat[id]);
+                    }
+
+                    // 尝试更新 UI 并保存
+                    updateMessageBlock(id, chat[id]);
+                    if (isTrueBoolean(args.save ?? 'true')) {
+                        await saveChatConditional();
+                    }
+                    toastr.success('Message evaluated successfully.', 'Free Swipe');
+                    
+                    // 格式化返回值
+                    if (result === undefined) return '';
+                    if (typeof result === 'object') {
+                        try {
+                            return JSON.stringify(result);
+                        } catch {
+                            return String(result);
+                        }
+                    }
+                    return String(result);
+                } catch (error) {
+                    console.error('[Free Swipe] Eval error:', error);
+                    toastr.error(`Eval error: ${error.message}`, 'Free Swipe');
+                }
+                return '';
             },
         }));
     } catch (error) {
