@@ -375,14 +375,15 @@ async function registerSlashCommands() {
 
                 let result;
                 try {
+                    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
                     // 尝试作为表达式执行 (自动 return)
                     try {
-                        const func = new Function(`return (${argText})`);
-                        result = func.call(chat[id]);
+                        const func = new AsyncFunction(`return (${argText})`);
+                        result = await func.call(chat[id]);
                     } catch (e) {
                         // 如果作为表达式失败，则作为普通语句执行
-                        const func = new Function(argText);
-                        result = func.call(chat[id]);
+                        const func = new AsyncFunction(argText);
+                        result = await func.call(chat[id]);
                     }
 
                     // 尝试更新 UI 并保存
