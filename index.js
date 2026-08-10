@@ -221,7 +221,7 @@ async function registerSlashCommands() {
             unnamedArgumentList: [
                 new SlashCommandArgument('message id (leave empty for the last message)', [ARGUMENT_TYPE.NUMBER], false),
             ],
-            callback: async function (args, argId) {
+            callback: async (args, argId) => {
                 const chat = getContext()?.chat;
                 if (!chat || chat.length === 0) {
                     toastr.warning('No messages to edit.', 'Free Swipe');
@@ -244,7 +244,8 @@ async function registerSlashCommands() {
         }));
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'updatetoolmessage',
-            helpString: 'Free Swipe - Updates the specified tool message from its actual JSON.\nUsage: /updatetmsg [save=true/false] [message_id | all | ni (e.g. 0i, -1i)]',
+            helpString: 'Free Swipe - Updates the specified tool message from its actual JSON.\nUsage: /updatetmsg [save=true/false] [message_id | all | ni (e.g. 0i, -1i)] [code]',
+            returns: 'string',
             aliases: ['ut', 'updatetmsg'],
             namedArgumentList: [
                 SlashCommandNamedArgument.fromProps({
@@ -255,10 +256,20 @@ async function registerSlashCommands() {
                     enumList: commonEnumProviders.boolean()(),
                 }),
             ],
+            splitUnnamedArgument: true,
+            splitUnnamedArgumentCount: 2,
             unnamedArgumentList: [
                 new SlashCommandArgument('message id (leave empty for the last message, "all" for all tool messages, "ni" for n-th tool message)', [ARGUMENT_TYPE.STRING, ARGUMENT_TYPE.NUMBER], false),
+                new SlashCommandArgument('code for the message', [ARGUMENT_TYPE.STRING], false),
             ],
-            callback: async function (args, argId) {
+            callback: async (args, argId, argText) => {
+                if (Array.isArray(argId) && argId.length >= 2) {
+                    argText = argId[1];
+                    argId = argId[0];
+                } else if (Array.isArray(argId) && argId.length === 1) {
+                    argId = argId[0];
+                }
+
                 const chat = getContext()?.chat;
                 if (!chat || chat.length === 0) {
                     toastr.warning('No messages to update.', 'Free Swipe');
@@ -303,7 +314,29 @@ async function registerSlashCommands() {
                     messagesToUpdate.push(id);
                 }
 
+                let result = '', fallback = false, func;
+                const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
                 for (const id of messagesToUpdate) {
+                    if (argText) {
+                        try {
+                            if (fallback) {
+                                result = await func.call(chat[id]);
+                            } else {
+                                try {
+                                    func ??= new AsyncFunction(`return (${argText})`);
+                                    result = await func.call(chat[id]);
+                                } catch (e) {
+                                    fallback = true;
+                                    func = new AsyncFunction(argText);
+                                    result = await func.call(chat[id]);
+                                }
+                            }
+                        } catch (error) {
+                            console.error('[Free Swipe] Eval error:', error);
+                            toastr.error(`Eval error: ${error.message}`, 'Free Swipe');
+                            return '';
+                        }
+                    }
                     const invocations = chat[id].extra.tool_invocations;
                     chat[id].mes = formatToolInvocationMessage(invocations);
                     updateMessageBlock(id, chat[id]);
@@ -317,7 +350,16 @@ async function registerSlashCommands() {
                 } else {
                     toastr.success('Tool message updated successfully.', 'Free Swipe');
                 }
-                return '';
+
+                if (result === undefined) return '';
+                if (typeof result === 'object') {
+                    try {
+                        return JSON.stringify(result);
+                    } catch {
+                        return String(result);
+                    }
+                }
+                return String(result);
             },
         }));
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
@@ -340,7 +382,7 @@ async function registerSlashCommands() {
                 new SlashCommandArgument('message id (leave empty for the last message)', [ARGUMENT_TYPE.NUMBER], false),
                 new SlashCommandArgument('code', [ARGUMENT_TYPE.STRING], true),
             ],
-            callback: async function (args, argId, argText) {
+            callback: async (args, argId, argText) => {
                 if (Array.isArray(argId) && argId.length >= 2) {
                     argText = argId[1];
                     argId = argId[0];
