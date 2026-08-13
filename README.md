@@ -1,6 +1,6 @@
 # Free Swipe for SillyTavern
 
-A simple SillyTavern extension that adds several utility slash commands, including `/aswipe`, `/editmessage`, `/updatetoolmessage`, and `/evalmessage`.
+A simple SillyTavern extension that adds several utility slash commands, including `/aswipe`, `/editmessage`, `/updatetoolmessage`, `/evalmessage`, and `/ignoremessage`.
 
 SillyTavern's default `/addswipe` command only supports adding swipes to the very last message, and does not support user messages. **Free Swipe** solves this by allowing you to add a swipe to **any** message in the chat history, including user messages. It also provides advanced tools for manipulating message states and tool invocations.
 
@@ -57,15 +57,39 @@ This is particularly useful for messages with `"isSmallSys": true` (which are ty
 Updates the displayed text of a tool message based on its actual underlying JSON (`extra.tool_invocations`). Useful when the JSON content has been modified but the frontend UI hasn't refreshed.
 
 **Syntax:**
-`/updatetoolmessage [save=true/false] [message_id | all | ni]`
+`/updatetoolmessage [save=true/false] [message_id | all | ni] [code]`
 
 **Parameters:**
 * `save` (Optional): `true` or `false`. Whether to save the chat after updating. Defaults to `true`.
 * `[message_id]` (Optional): The ID of the message. Supports standard IDs, negative IDs, `all` (updates all tool messages in the chat), or `ni` format (e.g., `0i` for the first tool message, `-1i` for the last tool message).
+* `[code]` (Optional): JavaScript code to evaluate on the message object before updating the UI.
 
 **Examples:**
 * `/updatetmsg all` - Refreshes all tool messages in the current chat.
 * `/updatetmsg -1i` - Refreshes the very last tool message in the chat.
+* `/updatetmsg -1i "this.extra.tool_invocations[0].result = 'test'"` - Modifies the tool result and refreshes the UI in one step.
+
+---
+
+### `/ignoremessage` (Aliases: `/igmsg`, `/ig`)
+Ignores or unignores a chat message from the prompt. Ignored messages will have a transparent background in the UI.
+
+**Important Notes:**
+* **High Priority:** This ignore mechanism takes precedence over the built-in hide feature (which relies on the `is_system` attribute, used by the `/hide` command and the UI hide button). This makes it especially useful for ignoring special messages, such as tool call messages.
+* **Compatibility:** This feature utilizes SillyTavern's internal `[IGNORE_SYMBOL]` attribute. To minimize potential conflicts with other extensions or future SillyTavern updates, this extension's loading priority has been set to load earlier. However, please be aware that conflicts might still occur.
+
+**Syntax:**
+`/ignoremessage [value=true/false] [save=true/false] [message_id | range]`
+
+**Parameters:**
+* `value` (Optional): `true` to ignore, `false` to unignore. If not provided, it toggles the current state.
+* `save` (Optional): `true` or `false`. Whether to save the chat after updating. Defaults to `true`.
+* `[message_id | range]` (Optional): The ID of the message or a range (e.g., `0-5`). Leave empty for the last message. Supports negative numbers.
+
+**Examples:**
+* `/igmsg` - Toggles the ignore state of the last message.
+* `/igmsg value=true -2` - Ignores the second-to-last message.
+* `/igmsg 0-5` - Toggles the ignore state for messages from index 0 to 5.
 
 ---
 

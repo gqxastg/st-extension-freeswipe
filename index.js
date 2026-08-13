@@ -1,7 +1,8 @@
 import { extension_settings, getContext, loadExtensionSettings } from "../../../extensions.js";
 import { getMessageTimeStamp } from "../../../RossAscends-mods.js";
 import { ToolManager } from '../../../tool-calling.js';
-import { isFalseBoolean, isTrueBoolean } from '../../../utils.js';
+import { isFalseBoolean, isTrueBoolean, stringToRange } from '../../../utils.js';
+import { IGNORE_SYMBOL } from '../../../constants.js';
 import { 
     saveSettingsDebounced,
     deleteSwipe,
@@ -12,6 +13,10 @@ import {
     extractMessageBias,
     messageEdit,
     updateMessageBlock,
+    eventSource, 
+    event_types, 
+    main_api, 
+    stopGeneration,
 } from "../../../../script.js";
 
 const extensionName = "st-extension-freeswipe";
@@ -452,11 +457,155 @@ async function registerSlashCommands() {
                 return '';
             },
         }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'ignoremessage',
+            helpString: 'Free Swipe - Ignores or unignores a chat message from the prompt.',
+            returns: 'string',
+            aliases: ['igmsg', 'ig'],
+            namedArgumentList: [
+                SlashCommandNamedArgument.fromProps({
+                    name: 'value',
+                    description: 'Whether to ignore (true) or unignore (false) the message. If not provided, it will toggle the current state.',
+                    typeList: [ARGUMENT_TYPE.BOOLEAN],
+                    enumList: commonEnumProviders.boolean()(),
+                }),
+                SlashCommandNamedArgument.fromProps({
+                    name: 'save',
+                    description: 'Whether to save the chat after ignoring or unignoring the message',
+                    typeList: [ARGUMENT_TYPE.BOOLEAN],
+                    defaultValue: 'true',
+                    enumList: commonEnumProviders.boolean()(),
+                }),
+            ],
+            unnamedArgumentList: [
+                SlashCommandArgument.fromProps({
+                    description: `message index (starts with 0) or range, defaults to the last message index if not provided`,
+                    typeList: [ARGUMENT_TYPE.NUMBER, ARGUMENT_TYPE.RANGE],
+                    isRequired: false,
+                    enumProvider: commonEnumProviders.messages(),
+                }),
+            ],
+            callback: async (args, argId) => {
+                const chat = getContext()?.chat;
+                if (!chat || chat.length === 0) {
+                    toastr.warning('No messages to ignore.', 'Free Swipe');
+                    return '';
+                }
+
+                const strArgId = String(argId ?? '').trim().toLowerCase();
+                let start, end;
+                if (!strArgId) {
+                    start = end = chat.length - 1;
+                } else if (strArgId.startsWith('-') || !strArgId.includes('-')) {
+                    start = end = calcId(chat, strArgId);
+                    if (isNaN(start)) {
+                        toastr.error('Message ID is invalid or out of bounds.', 'Free Swipe');
+                        return '';
+                    }
+                } else {
+                    const range = stringToRange(strArgId, 0, chat.length - 1);
+                    if (!range) {
+                        toastr.error('Invalid range provided.', 'Free Swipe');
+                        return '';
+                    }
+                    start = range.start;
+                    end = range.end;
+                }
+
+                let value = (args.value !== null && args.value !== undefined) ? isTrueBoolean(args.value) : null;
+                if (value === null) {
+                    let allHidden = true;
+                    for (let messageId = start; messageId <= end; messageId++) {
+                        const msg = chat[messageId];
+                        if (!msg) continue;
+                        if (!msg.extra?.freeswipe_is_hidden) {
+                            allHidden = false;
+                            break;
+                        }
+                    }
+                    value = allHidden ? false : true;
+                }
+
+                let count = 0;
+                for (let messageId = start; messageId <= end; messageId++) {
+                    const msg = chat[messageId];
+                    if (!msg) continue;
+                    if (value) {
+                        if (msg.extra?.freeswipe_is_hidden) continue;
+                        msg.extra ||= {};
+                        msg.extra.freeswipe_is_hidden = true;
+                    } else {
+                        if (!msg.extra?.freeswipe_is_hidden) continue;
+                        delete msg.extra.freeswipe_is_hidden;
+                    }
+                    count++;
+                }
+
+                applyIgnoreSymbols(chat, start, end);
+                if (isTrueBoolean(args.save ?? 'true')) {
+                    await saveChatConditional();
+                }
+
+                if (count > 1) {
+                    toastr.success(`Updated ${count} messages.`, 'Free Swipe');
+                } else if (count === 1) {
+                    toastr.success('Message updated successfully.', 'Free Swipe');
+                } else {
+                    toastr.info('No messages to update.', 'Free Swipe');
+                }
+                return '';
+            },
+        }));
     } catch (error) {
         console.error('[Free Swipe] Failed to register slash commands:', error);
-        toastr.error('[Free Swipe] Failed to register slash commands.', 'Free Swipe');
+        toastr.error('Failed to register slash commands.', 'Free Swipe');
     }
 }
+
+function isChatCompletion() {
+    return main_api === 'openai';
+}
+function applyIgnoreSymbols(chat = getContext()?.chat, start = 0, end) {
+    // console.debug('[Free Swipe]', chat, 'range', start, end);
+    if (!chat || !chat.length) return;
+    end = end ?? (chat.length - 1);
+
+    for (let messageId = start; messageId <= end; messageId++) {
+        const msg = chat[messageId];
+        if (!msg) continue;
+        let result;
+        if (!msg.extra) {
+            result = false;
+        } else {
+            if (msg.extra.freeswipe_is_hidden) {
+                msg.extra[IGNORE_SYMBOL] = true;
+                result = true;
+            } else {
+                delete msg.extra[IGNORE_SYMBOL];
+                result = false;
+                // if (Object.keys(msg.extra).length === 0) delete msg.extra;
+            }
+        }
+
+        const messageBlock = $(`.mes[mesid="${messageId}"]`);
+        // console.debug('[Free Swipe]', messageBlock, 'applyIgnoreSymbols', result);
+        if (!messageBlock.length) continue;
+        if (result) {
+            messageBlock.attr('freeswipe_is_hidden', String(result));
+        } else {
+            messageBlock.removeAttr('freeswipe_is_hidden');
+        }
+    }
+}
+eventSource.on(event_types.CHAT_CHANGED, async (chatName) => {
+    // toastr.info(`Chat changed. Current chat: ${chatName}`, 'Free Swipe');
+    try {
+        applyIgnoreSymbols();
+    } catch (error) {
+        console.error('[Free Swipe] Error applying ignore symbols:', error);
+        toastr.error('Error applying ignore symbols.', 'Free Swipe');
+    }
+});
 
 jQuery(async () => {
     /*
