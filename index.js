@@ -562,17 +562,39 @@ async function registerSlashCommands() {
     }
 }
 
-function isChatCompletion() {
-    return main_api === 'openai';
-}
-function applyIgnoreSymbols(chat = getContext()?.chat, start = 0, end) {
+function applyIgnoreSymbols(
+    chat = getContext()?.chat,
+    start = 0,
+    end = (chat?.length ?? 0) - 1
+) {
     // console.debug('[Free Swipe]', chat, 'range', start, end);
     if (!chat || !chat.length) return;
-    end = end ?? (chat.length - 1);
+
+    // const totalToUpdate = end - start + 1;
+    const isFullScan = (start === 0 && end === chat.length - 1);
+
+    if (isFullScan) {
+        const messageBlocks = document.querySelectorAll('.mes[mesid]');
+        messageBlocks.forEach((block) => {
+            const messageId = parseInt(block.getAttribute('mesid'), 10);
+            if (isNaN(messageId)) return;
+
+            const result = chat[messageId]?.extra?.freeswipe_is_hidden;
+            if (result) {
+                block.setAttribute('freeswipe_is_hidden', 'true');
+            } else {
+                block.removeAttribute('freeswipe_is_hidden');
+            }
+        });
+        return;
+    }
 
     for (let messageId = start; messageId <= end; messageId++) {
         const msg = chat[messageId];
         if (!msg) continue;
+
+        let result = msg.extra?.freeswipe_is_hidden;
+        /*
         let result;
         if (!msg.extra) {
             result = false;
@@ -586,18 +608,19 @@ function applyIgnoreSymbols(chat = getContext()?.chat, start = 0, end) {
                 // if (Object.keys(msg.extra).length === 0) delete msg.extra;
             }
         }
+        */
 
-        const messageBlock = $(`.mes[mesid="${messageId}"]`);
+        const messageBlock = document.querySelector(`.mes[mesid="${messageId}"]`);
         // console.debug('[Free Swipe]', messageBlock, 'applyIgnoreSymbols', result);
-        if (!messageBlock.length) continue;
+        if (!messageBlock) continue;
         if (result) {
-            messageBlock.attr('freeswipe_is_hidden', String(result));
+            messageBlock.setAttribute('freeswipe_is_hidden', 'true'); // String(result)
         } else {
-            messageBlock.removeAttr('freeswipe_is_hidden');
+            messageBlock.removeAttribute('freeswipe_is_hidden');
         }
     }
 }
-eventSource.on(event_types.CHAT_CHANGED, async (chatName) => {
+eventSource.on(event_types.CHAT_CHANGED, (chatName) => {
     // toastr.info(`Chat changed. Current chat: ${chatName}`, 'Free Swipe');
     try {
         applyIgnoreSymbols();
@@ -606,6 +629,31 @@ eventSource.on(event_types.CHAT_CHANGED, async (chatName) => {
         toastr.error('Error applying ignore symbols.', 'Free Swipe');
     }
 });
+eventSource.on(event_types.MORE_MESSAGES_LOADED, () => {
+    // toastr.info(`MORE_MESSAGES_LOADED`, 'Free Swipe');
+    try {
+        applyIgnoreSymbols();
+    } catch (error) {
+        console.error('[Free Swipe] Error applying ignore symbols:', error);
+        toastr.error('Error applying ignore symbols.', 'Free Swipe');
+    }
+});
+async function filterChatInterceptor(chat, contextSize, abort, type) {
+    try {
+        if (!Array.isArray(chat)) return;
+        for (let i = chat.length - 1; i >= 0; i--) {
+            const msg = chat[i];
+            if (msg?.extra?.freeswipe_is_hidden) {
+                chat.splice(i, 1);
+                // console.debug('[Free Swipe] Removed message from context', msg);
+            }
+        }
+    } catch (error) {
+        console.error('[Free Swipe] Error in filterChatInterceptor:', error);
+        toastr.error('Error in filterChatInterceptor.', 'Free Swipe');
+    }
+}
+globalThis.freeswipe_filterChat = filterChatInterceptor;
 
 jQuery(async () => {
     /*

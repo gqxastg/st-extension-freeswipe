@@ -1,3 +1,12 @@
 .mes[freeswipe_is_hidden="true"] {
-    background-color: transparent !important;
+    background-image: repeating-linear-gradient(
+        45deg,
+        rgba(255, 255, 0, 0.1),
+        rgba(255, 255, 0, 0.1) 20px,
+        rgba(0, 0, 0, 0.1) 20px,
+        rgba(0, 0, 0, 0.1) 40px
+    );
+}
+.mes[freeswipe_is_hidden="true"]:hover {
+    background-image: unset;
 }

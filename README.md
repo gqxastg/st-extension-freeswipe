@@ -72,11 +72,10 @@ Updates the displayed text of a tool message based on its actual underlying JSON
 ---
 
 ### `/ignoremessage` (Aliases: `/igmsg`, `/ig`)
-Ignores or unignores a chat message from the prompt. Ignored messages will have a transparent background in the UI.
+Ignores or unignores a chat message from the prompt. Ignored messages will be filtered out from the context sent to the AI and will display a custom striped background pattern in the UI.
 
-**Important Notes:**
-* **High Priority:** This ignore mechanism takes precedence over the built-in hide feature (which relies on the `is_system` attribute, used by the `/hide` command and the UI hide button). This makes it especially useful for ignoring special messages, such as tool call messages.
-* **Compatibility:** This feature utilizes SillyTavern's internal `[IGNORE_SYMBOL]` attribute. To minimize potential conflicts with other extensions or future SillyTavern updates, this extension's loading priority has been set to load earlier. However, please be aware that conflicts might still occur.
+**Note:**
+This ignore mechanism takes precedence over the built-in hide feature (which relies on the `is_system` attribute, used by the `/hide` command and the UI hide button). This makes it especially useful for ignoring special messages, such as tool call messages.
 
 **Syntax:**
 `/ignoremessage [value=true/false] [save=true/false] [message_id | range]`

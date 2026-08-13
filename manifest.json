@@ -3,6 +3,7 @@
     "loading_order": 1,
     "requires": [],
     "optional": [],
+    "generate_interceptor": "freeswipe_filterChat",
     "js": "index.js",
     "css": "style.css",
     "author": "Arashi_Lei (岚风 雷)",
